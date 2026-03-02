@@ -52,16 +52,10 @@
 #define REG_FIFO_CONFIG_SMP_AVE_SHIFT		5
 #define REG_FIFO_CONFIG_SMP_AVE_MASK		GENMASK(7,5)
 #define REG_FIFO_CONFIG_ROLLOVER_EN		BIT(4)
-#define REG_FIFO_CONFIG_ROLLOVER_SHIFT		BIT(4)
-#define REG_FIFO_CONFIG_ROLLOVER_MASK		BIT(4)
 #define REG_FIFO_CONFIG_FIFO_A_FULL		0x06
 #define REG_FIFO_CONFIG_FIFO_A_FULL_MASK	GENMASK(3,0)
 #define REG_FIFO_CONFIG_FIFO_A_FULL_SHIFT	0
-#define REG_FIFO_CONFIG_MASKS \
-	(REG_FIFO_CONFIG_SMP_AVE_MASK | \
-	 REG_FIFO_CONFIG_ROLLOVER_MASK| \
-	 REG_FIFO_CONFIG_FIFO_A_FULL_MASK \
-	 )
+#define REG_FIFO_CONFIG_FIFO_MASKS		GENMASK(7,0)
 
 #define REG_MODE_CONFIG				0x09
 #define REG_MODE_CONFIG_SHDN_SHIFT		7
@@ -82,13 +76,14 @@
 #define REG_SPO2_SR_MASK  			GENMASK(4,2)
 #define REG_SPO2_PW_SHIFT 			0
 #define REG_SPO2_PW_MASK  			GENMASK(1,0)
-#define REG_SPO2_CONFIG_MASK \
- (REG_SPO2_ADC_MASK | REG_SPO2_SR_MASK | REG_SPO2_PW_MASK)
+#define REG_SPO2_CONFIG_MASKS			GENMASK(6,0)
+
 #define SPO2_ADC_4096				1
 #define SPO2_SR_100HZ				3
+#define SPO2_PW_411US 				3
+
 #define REG_MULTI_LED1_CONFIG			0x11
 #define REG_MULTI_LED2_CONFIG			0x12
-#define SPO2_PW_411US 				3
 
 #define REG_LED1_PA				0x0C	/* RED */
 #define REG_LED2_PA				0x0D	/* IR */
@@ -151,14 +146,15 @@ static const struct iio_chan_spec max30102_channels[] = {
 
 };
 
-
 static const struct regmap_config max30102_regmap_config = {
 	.reg_bits = 8,
 	.val_bits = 8,
 	.max_register = 0xFF,
 };
 
-static int max30102_read_raw(struct iio_dev *indio_dev, struct iio_chan_spec const *chan, int *val , int *val2, long mask)
+static int max30102_read_raw(struct iio_dev *indio_dev,
+	       	   	     struct iio_chan_spec const *chan, int *val ,
+			     int *val2, long mask)
 {
         return 0;
 }
@@ -169,15 +165,20 @@ static const struct iio_info max30102_iio_info = {
 
 int process_max30102_data(struct max30102_data *md)
 {
-	md->assembled_data[0] = (((u32)md->buffer[0] << 16) | ((u32)md->buffer[1] << 8)  | (u32)md->buffer[2]) & 0x3FFFF;
+	md->assembled_data[0] = (((u32)md->buffer[0] << 16) |
+				((u32)md->buffer[1] << 8)  |
+			       	(u32)md->buffer[2]) & 0x3FFFF;
 
-	md->assembled_data[1] = (((u32)md->buffer[3] << 16) | ((u32)md->buffer[4] << 8)  | (u32)md->buffer[5]) & 0x3FFFF;
+	md->assembled_data[1] = (((u32)md->buffer[3] << 16) |
+		       		((u32)md->buffer[4] << 8)  |
+			       	(u32)md->buffer[5]) & 0x3FFFF;
 
 	/* store assembled data to iio_frame */
 	md->iio_frame[0] = cpu_to_be32(md->assembled_data[0] << 8);
 	md->iio_frame[1] = cpu_to_be32(md->assembled_data[1] << 8);
 
-	iio_push_to_buffers_with_timestamp(md->indio_dev, md->iio_frame, iio_get_time_ns(md->indio_dev));
+	iio_push_to_buffers_with_timestamp(md->indio_dev, md->iio_frame,
+		       			   iio_get_time_ns(md->indio_dev));
 	return 0;
 }
 
@@ -212,8 +213,8 @@ static int max30102_disable_ints(struct max30102_data *md)
 {
 	int ret;
 	
-	ret = regmap_update_bits(md->regmap, REG_INT_ENABLE1, REG_INT_ENABLE1_MASK,
-				 0);
+	ret = regmap_update_bits(md->regmap, REG_INT_ENABLE1, 
+				 REG_INT_ENABLE1_MASK, 0);
 
 	if (ret) {
 		dev_err(md->dev, "max30102_disable_ints() error");
@@ -235,7 +236,8 @@ static int max30102_enable_ints(struct max30102_data *md)
 {
 	int ret;
 	
-	ret = regmap_update_bits(md->regmap, REG_INT_ENABLE1, REG_INT_ENABLE1_MASK,
+	ret = regmap_update_bits(md->regmap, REG_INT_ENABLE1,
+		       	 	 REG_INT_ENABLE1_MASK,
 				 (REG_INT_ENABLE1_A_FULL ) |
 				 (REG_INT_ENABLE1_PPG_RDY_EN) |
 				 (REG_INT_ENABLE1_ALC_OVF_EN));
@@ -284,7 +286,8 @@ static int max30102_set_powermode(struct max30102_data *md)
 	int ret;
 
 	/* enable power saving mode */
-	ret = regmap_update_bits(md->regmap, REG_MODE_CONFIG, REG_MODE_CONFIG_SHDN,
+	ret = regmap_update_bits(md->regmap, REG_MODE_CONFIG, 
+				 REG_MODE_CONFIG_SHDN,
 		       		 REG_MODE_CONFIG_SHDN);
 
 	if (ret) {
@@ -296,7 +299,8 @@ static int max30102_set_powermode(struct max30102_data *md)
 
 static void max30102_workqueue(struct work_struct *work)
 {
- 	struct max30102_data *md = container_of(work, struct max30102_data , work);
+ 	struct max30102_data *md = container_of(work, struct max30102_data,
+		       				work);
         struct device *dev  = md->dev;
 
 	int ret;
@@ -382,8 +386,9 @@ int max30102_chip_init(struct max30102_data *md)
        	unsigned  int reg;
 	
 	/* Reset device */
-	ret = regmap_update_bits(md->regmap, REG_MODE_CONFIG, REG_MODE_CONFIG_RESET,
-			REG_MODE_CONFIG_RESET << REG_MODE_CONFIG_RESET_SHIFT);
+	ret = regmap_update_bits(md->regmap, REG_MODE_CONFIG, 
+				 REG_MODE_CONFIG_RESET,
+				 REG_MODE_CONFIG_RESET);
 
 	if (ret) {
 		dev_err(md->dev, "reset failed!\n");
@@ -418,8 +423,9 @@ int max30102_chip_init(struct max30102_data *md)
 	dev_dbg(md->dev, "max30102 revision %02x\n", reg);
 
 	/* put device in shutdown */
-	ret = regmap_update_bits(md->regmap, REG_MODE_CONFIG, REG_MODE_CONFIG_SHDN , 
-			REG_MODE_CONFIG_SHDN << REG_MODE_CONFIG_SHDN_SHIFT );
+	ret = regmap_update_bits(md->regmap, REG_MODE_CONFIG,
+				 REG_MODE_CONFIG_SHDN , 
+				 REG_MODE_CONFIG_SHDN);
 
 	if (ret) {
 		dev_err(md->dev, "set mode shutdown failed!\n");
@@ -442,19 +448,20 @@ int max30102_chip_init(struct max30102_data *md)
 	}
 
 	/* FIFO configurations */
-	ret = regmap_write(md->regmap,REG_FIFO_CONFIG,(REG_FIFO_CONFIG_SMP_4AVE
-				<<REG_FIFO_CONFIG_SMP_AVE_SHIFT) |(
-				REG_FIFO_CONFIG_ROLLOVER_EN 
-				<< REG_FIFO_CONFIG_ROLLOVER_SHIFT) | (
-				REG_FIFO_CONFIG_FIFO_A_FULL <<
-				REG_FIFO_CONFIG_FIFO_A_FULL_SHIFT));
+	ret = regmap_write(md->regmap,REG_FIFO_CONFIG,
+		       	  (REG_FIFO_CONFIG_SMP_4AVE <<
+			   REG_FIFO_CONFIG_SMP_AVE_SHIFT) | 
+			  (REG_FIFO_CONFIG_ROLLOVER_EN ) | 
+			  (REG_FIFO_CONFIG_FIFO_A_FULL << 
+			   REG_FIFO_CONFIG_FIFO_A_FULL_SHIFT));
 	if (ret) {
 		dev_err(md->dev, "fifo configuration failed!\n");
 		return ret;
 	}
 
 	/* spo2 configurations */
-	ret = regmap_update_bits(md->regmap, REG_SPO2_CONFIG, REG_SPO2_CONFIG_MASK,
+	ret = regmap_update_bits(md->regmap, REG_SPO2_CONFIG, 
+			REG_SPO2_CONFIG_MASKS,
 		       (SPO2_ADC_4096 << REG_SPO2_ADC_SHIFT) |
 		       (SPO2_SR_100HZ << REG_SPO2_SR_SHIFT) |
 		       (SPO2_PW_411US << REG_SPO2_PW_SHIFT));
@@ -466,7 +473,7 @@ int max30102_chip_init(struct max30102_data *md)
 
 	/*  mode configuration */
 	ret = regmap_update_bits(md->regmap, REG_MODE_CONFIG, REG_MODE_MASK,
-			MODE_SPO2 << REG_MODE_SHIFT);
+				 MODE_SPO2);
         if (ret) {
 		dev_err(md->dev, "set spo2 mode failed!\n");
 		return ret;
@@ -487,8 +494,9 @@ int max30102_chip_init(struct max30102_data *md)
 	}
 	
 	/* clear SHDN bit to zero */ 
-	ret = regmap_update_bits(md->regmap, REG_MODE_CONFIG, REG_MODE_CONFIG_SHDN,
-			0 << REG_MODE_CONFIG_SHDN_SHIFT);
+	ret = regmap_update_bits(md->regmap, REG_MODE_CONFIG, 
+				 REG_MODE_CONFIG_SHDN, 0 <<
+		       		 REG_MODE_CONFIG_SHDN_SHIFT);
 
 	if (ret) {
 		dev_err(md->dev, "shdn clear failed!");
@@ -685,8 +693,9 @@ static int max30102_resume(struct device *dev)
 		return -ENODEV;
 	}
 
-	int ret = regmap_update_bits(md->regmap, REG_MODE_CONFIG, REG_MODE_CONFIG_SHDN
-				     ,REG_MODE_CONFIG);
+	int ret = regmap_update_bits(md->regmap, REG_MODE_CONFIG,
+		       	 	     REG_MODE_CONFIG_SHDN, 
+				     REG_MODE_CONFIG);
 
 	if (ret) {
 		dev_err(dev, "regmap_update_bits() error");
