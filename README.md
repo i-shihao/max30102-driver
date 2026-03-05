@@ -2,6 +2,7 @@
 
 ## Table of Contents
  - [Overview](#overview)
+ - [Supported Devices](#supported devices)
  - [Features](#features)
  - [Hardware Connections](#hardware-connections)
  - [Device Tree Example](#device-tree-example)
@@ -17,6 +18,16 @@
  A max30102 spo2 heatrate oximeter sensor driver based on Linux i2c subsystem. Developed and tested on ARM-based
  platfroms such as Raspberry Pi 4 Model B. Exposes sensor data through Linux iio intefaces. Designed and developed for
  learning linux kernel device driver development.
+
+## Supported Devices
+ 
+- MAX30102 Pulse Oximetry and Heart-Rate Sensor
+
+### Tested Environment
+
+- Board: Raspberry Pi 4 Model B
+- Kernel: Linux 6.17 (aarch64)
+- Interface: I2C
 
 ## Features
 
@@ -37,8 +48,10 @@
  | SCL        | I2C-SCL     | Clock Line  |
  | SDA        | I2C_SDA     | Data line   |
  | INT        | GPIO-x      | Interupt    |
+ | IRD        | not used    | not used    |
+ | RO         | not used    | not used    |
 
-Note: Sensor pins IR and RED must be left untouched
+Note: Sensor pins IRD and RO must be left untouched
 
 ## Device Tree Example
 
@@ -59,7 +72,7 @@ i2c@7e804000 {
 ## Build and Install
 
 ### Requirements
- - Linux kernel: 6.18
+ - Linux kernel: 6.17
  - Architecture: ARM64
  - Board: Raspberry Pi 4 Model B
  - Compiler: GCC (15.2.1)
@@ -80,7 +93,7 @@ i2c@7e804000 {
  can be used to read values from the sensor through its iio interface entries. Dmesg and other kernel
  logs can be used to verify driver probe , initialization and functionality.
 
-### Check device  entry
+### Check device
     ls /sys/bus/i2c/devices/i2c-1/1-00057/
 ### Check entries
     ls /sys/bus/i2c/devices/i2c-1/1-0057/iio:deviceX/
@@ -114,13 +127,11 @@ i2c@7e804000 {
 ### Ensure modules are present
     lsmod | grep industrialio
     lsmod | grep kfifo_buf
-### If no loaded load manually
+### If not loaded load manually
     sudo modprobe industrialio
     sudo modprobe kfifo_buf
 ### Try inserting the driver again
     sudo insmod max30102.ko
-### Verify device 
-    i2cdetect -y 1
 ### Check module status now
     sudo dmesg | grep max30102
  
@@ -128,5 +139,3 @@ i2c@7e804000 {
 
  This driver is license under the GNU General Public License version v2.0 GPL-2.0. For more information
  refer to License file.
-
-
