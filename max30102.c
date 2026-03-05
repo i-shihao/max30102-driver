@@ -116,10 +116,7 @@
 struct max30102_data {
 	struct regmap *regmap;
 	struct iio_dev *indio_dev;
-        struct work_struct work;
-        struct gpio_desc *led_gpio;
         struct device *dev;
-        bool device_state;
 	u8 buffer[12];
 	u8 bak_buf[192];
 	u32 assembled_data[2];
@@ -216,7 +213,7 @@ static int max30102_disable_ints(struct max30102_data *md)
 				 REG_INT_ENABLE1_MASK, 0);
 
 	if (ret) {
-		dev_err(md->dev, "max30102_disable_ints() failed");
+		dev_err(md->dev, "max30102_disable_ints() failed %d", ret);
 		return ret;
 	}
 
@@ -224,7 +221,7 @@ static int max30102_disable_ints(struct max30102_data *md)
 				 REG_INT_ENABLE2_DIE_TEMP_RDY_EN,
 				 0 );
 	if (ret) {
-		dev_err(md->dev, "max30102_disable_ints() failed");
+		dev_err(md->dev, "max30102_disable_ints() failed %d", ret);
 		return ret;
 	}
 
@@ -260,7 +257,7 @@ static int max30102_clearfifo(struct max30102_data *md)
 	int ret = regmap_write(md->regmap, REG_FIFO_WR_PTR,0);
 
         if (ret) {
-		dev_err(md->dev, "fifo clear ptr failed!!");
+		dev_err(md->dev, "fifo clear ptr failed! %d", ret);
 		return ret;
 	}
 
@@ -297,28 +294,72 @@ static int max30102_set_shdnmode(struct max30102_data *md)
 	return 0;
 }
 
-static void max30102_workqueue(struct work_struct *work)
+static irqreturn_t  max30102_irq_thread_fn(int irq, void *dev_id)
 {
- 	struct max30102_data *md = container_of(work, struct max30102_data,
-		       				work);
-        struct device *dev  = md->dev;
-	
+	struct max30102_data *md = dev_id;
+       	struct device *dev  = md->dev;
+	unsigned val;
 	int ret;
 
 	if (!md && !dev) {
 		pr_info("container_of() error");
-		return;
+		return IRQ_NONE;
 	}
+	
+	usleep_range(200, 400);
+	
+	/* read both int status registers */
+	ret = regmap_read(md->regmap, REG_INT_STATUS1, &val);
+
+	if (ret) {
+		dev_err(md->dev, "int1 regmap_read() error %d", ret);
+	
+		ret  = regmap_read(md->regmap, REG_INT_STATUS1, &val);
+		if (ret) {
+			dev_err(md->dev, "second read failed");
+			return IRQ_HANDLED;
+		}
+	}
+
+	md->intstatus = val;
+
+	ret = regmap_read(md->regmap,REG_INT_STATUS2, &val);
+
+	if (ret) {
+		dev_err(md->dev, "int2regmap_read() error %d", ret);
+		return IRQ_HANDLED;
+	}
+
+	md->intstatus1 = val;
+
+	/* read  r/w pointer */
+	unsigned int r_value, w_value;	
+
+	ret = regmap_read(md->regmap, REG_FIFO_WR_PTR,&w_value);
+
+	if  (ret) {
+		dev_err(md->dev, "remap_read() error");
+		return ret;
+	}
+
+	ret = regmap_read(md->regmap, REG_FIFO_RD_PTR, &r_value);
+
+	if (ret) {
+		dev_err(md->dev, "regmap_read() error");
+		return ret;
+	}
+	pr_info("read %d and write %d",r_value,w_value);
+
 
 	int unread_bytes = cal_unread_bytes(md);
 
 	if (unread_bytes < 0) {
 		dev_err(md->dev, "cal_unread_bytes() error");
-		return;
+		return IRQ_NONE;
 	}
 
 	dev_info(md->dev, "unread_bytes :%d\n",unread_bytes);
-
+ 
 	if (md->intstatus & REG_INT_STATUS1_A_FULL) {
 	       dev_info(dev, "inturrpt A_FULL!");
 
@@ -326,7 +367,7 @@ static void max30102_workqueue(struct work_struct *work)
 			       	       md->bak_buf, unread_bytes);
 		if (ret) {
 			dev_err(dev, "regmap_bulk_read() error");
-			return;
+			return IRQ_NONE;
 			}
 	}
 
@@ -337,7 +378,7 @@ static void max30102_workqueue(struct work_struct *work)
 				       md->buffer, unread_bytes);
 		if (ret) {
 			dev_err(dev, "regmap_bulk_read() error!");
-			return;
+			return IRQ_NONE;
 		}
 	}
 
@@ -351,46 +392,24 @@ static void max30102_workqueue(struct work_struct *work)
 
 	if (ret) {
 		dev_err(md->dev,"process_max30102_data() error");
-		return;
+		return IRQ_NONE;
 	}
 
-	return;	
+	return IRQ_HANDLED;	
 }
 
 static irqreturn_t max30102_irq_handler(int irq , void *dev_id)
 {
-	int ret;
-	unsigned val;
-
 	struct max30102_data *md = dev_id;
 
-	if (!md)
-		return IRQ_NONE;	
+	if (!md) {
+		pr_info("interrupt occured!");
+		return IRQ_WAKE_THREAD;
+	}	
 
- 	/* read both int status registers */
 	dev_info(md->dev, "interrupt occured!\n");
-	ret = regmap_read(md->regmap, REG_INT_STATUS1, &val);
 
-	if (ret) {
-		dev_err(md->dev, "regmap_read() error!");
-		return IRQ_NONE;
-	}
-
-	md->intstatus = val;
-
-	ret = regmap_read(md->regmap,REG_INT_STATUS2, &val);
-
-	if (ret) {
-		dev_err(md->dev, "regmap_read() error!");
-		return IRQ_NONE;
-	}
-
-	md->intstatus1 = val;
-
-	dev_info(md->dev, "scheduling workqueue");
-	schedule_work(&md->work);
-
-	return IRQ_HANDLED;
+	return IRQ_WAKE_THREAD;
 }
 
 int max30102_chip_init(struct max30102_data *md)
@@ -424,7 +443,7 @@ int max30102_chip_init(struct max30102_data *md)
 		return ret;
 	}
 
-	dev_dbg(md->dev, "max30102 part id %02x\n", reg);
+	dev_info(md->dev, "max30102 part id %02x\n", reg);
 
 	ret = regmap_read(md->regmap, REG_REV_ID, &reg);
 
@@ -433,7 +452,7 @@ int max30102_chip_init(struct max30102_data *md)
 		return ret;
 	}
 
-	dev_dbg(md->dev, "max30102 revision %02x\n", reg);
+	dev_info(md->dev, "max30102 revision %02x\n", reg);
 
 	/* put device in shutdown */
 	ret = regmap_update_bits(md->regmap, REG_MODE_CONFIG,
@@ -484,18 +503,35 @@ int max30102_chip_init(struct max30102_data *md)
        		return ret;
 	}		
 
-	/*  mode configuration */
-	ret = regmap_update_bits(md->regmap, REG_MODE_CONFIG, REG_MODE_MASK,
-				 MODE_SPO2);
-        if (ret) {
-		dev_err(md->dev, "set spo2 mode failed!\n");
+	/* disable interrupts */
+	ret = max30102_disable_ints(md);
+	
+	if (ret) {
+		dev_err(md->dev, "max30102_disable_ints() error!");
 		return ret;
 	}
-
+	
 	ret =  max30102_clearfifo(md);
 
         if (ret) {
 		dev_err(md->dev, "max30102_clearfifo failed!");
+		return ret;
+	}
+
+	/* clear both int status registers */
+	unsigned int val;
+
+	ret = regmap_read(md->regmap, REG_INT_STATUS1, &val);
+
+	if (ret) {
+		dev_err(md->dev, "clear int failed %d", ret);
+		return ret;
+	}
+	
+	ret = regmap_read(md->regmap,REG_INT_STATUS2, &val);
+
+	if (ret) {
+		dev_err(md->dev, " clear int failed %d", ret);
 		return ret;
 	}
 
@@ -505,14 +541,41 @@ int max30102_chip_init(struct max30102_data *md)
 		dev_err(md->dev, "max30102_enable_ints() error!");
 		return ret;
 	}
-	
+
 	/* clear SHDN bit to zero */ 
 	ret = regmap_update_bits(md->regmap, REG_MODE_CONFIG, 
-				 REG_MODE_CONFIG_SHDN, 0 <<
-		       		 REG_MODE_CONFIG_SHDN_SHIFT);
+				 REG_MODE_CONFIG_SHDN, 0);
 
 	if (ret) {
 		dev_err(md->dev, "shdn clear failed!");
+		return ret;
+	}	
+
+	usleep_range(1000, 2000);
+
+	/*  mode configuration */
+	ret = regmap_update_bits(md->regmap, REG_MODE_CONFIG, REG_MODE_MASK,
+				 MODE_SPO2);
+        if (ret) {
+		dev_err(md->dev, "set spo2 mode failed!\n");
+		return ret;
+	}
+
+
+	/* clear both int status registers */
+	ret = regmap_read(md->regmap, REG_INT_STATUS1, &val);
+
+	if (ret) {
+		dev_err(md->dev, "clear int failed %d", ret);
+		return ret;
+	}
+	
+	usleep_range(1000, 2000);
+
+	ret = regmap_read(md->regmap,REG_INT_STATUS2, &val);
+
+	if (ret) {
+		dev_err(md->dev, " clear int failed %d", ret);
 		return ret;
 	}
 
@@ -521,14 +584,20 @@ int max30102_chip_init(struct max30102_data *md)
 
 static int max30102_probe(struct i2c_client *client)
 {
+	struct iio_dev *indio_dev;
 	struct max30102_data *md;
 	struct device *dev = &client->dev;
 	int ret;
 
-	md = devm_kzalloc(dev,sizeof(md), GFP_KERNEL);
+	indio_dev = devm_iio_device_alloc(dev, sizeof(*md));
 
-	if (!md)
+	if (!indio_dev) {
+		dev_err(dev, "iio_device_alloc() error\n");
 		return -ENOMEM;
+	}
+
+	md = iio_priv(indio_dev);
+	md->indio_dev = indio_dev;
 
 	/* regmap configurations */
 	md->regmap = devm_regmap_init_i2c(client, &max30102_regmap_config);
@@ -537,17 +606,10 @@ static int max30102_probe(struct i2c_client *client)
 
 
 	/* iio inteface configurations */
-	md->indio_dev = devm_iio_device_alloc(dev, sizeof(struct max30102_data));
-
-	if (!md->indio_dev) {
-		dev_err(dev, "iio_device_alloc() error\n");
-		return -ENOMEM;
-	}
-
 	md->indio_dev->info = &max30102_iio_info;
         md->indio_dev->channels = max30102_channels;
         md->indio_dev->num_channels = ARRAY_SIZE(max30102_channels);
-        md->indio_dev->name  = "smd1306";
+        md->indio_dev->name  = "max30102";
         md->indio_dev->available_scan_masks = max30102_scan_masks;
         md->indio_dev->modes  = INDIO_DIRECT_MODE | INDIO_BUFFER_SOFTWARE;
 
@@ -559,23 +621,10 @@ static int max30102_probe(struct i2c_client *client)
         }
 
 	/* set private data */
+	md->dev = dev;
 	i2c_set_clientdata(client, md);
 	dev_set_drvdata(&client->dev,md);
-
-	/* interrupt configuration */
-	md->irq = client->irq;
-
-	ret = devm_request_irq(dev, md->irq, max30102_irq_handler, 0 , "max30102", md);
-
-	if (ret) {
-		dev_err(dev, "request_irq() error!");
-		return ret;
-	}
-
-	INIT_WORK(&md->work, max30102_workqueue);
-
-	disable_irq(md->irq);
-
+	
 	/* chip initialization */
 	ret = max30102_chip_init(md);
 	
@@ -584,18 +633,29 @@ static int max30102_probe(struct i2c_client *client)
 		return ret;
 	}
 
-	enable_irq(md->irq);
+	dev_info(dev, "initialization successfull");
 
         ret = devm_iio_device_register(dev, md->indio_dev);
 
         if (ret < 0 ) {
-                dev_err(dev,"iio_device_register() error\n");
+                dev_err(dev,"iio_device_register() error");
                 return -ENODEV;
         }
 
         dev_info(dev, "iio registered\n");
 
-	pr_info("device ready\n");
+	/* interrupt configuration */
+	md->irq = client->irq;
+
+	ret = devm_request_threaded_irq(dev, md->irq, max30102_irq_handler,
+		       			max30102_irq_thread_fn,  IRQF_ONESHOT
+					, "max30102", md);
+	if (ret) {
+		dev_err(dev, "request_irq() error!");
+		return ret;
+	}
+
+	dev_info(dev, "device ready");
 	return 0;
 }
 
