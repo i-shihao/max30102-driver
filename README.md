@@ -72,8 +72,35 @@ spi@0 {
 ### Remove
     rmmod max30102
 
+## Usage
+
+ Following sucessfull module inertion the driver probes the device and initialize the chip
+ following configured init sequence. The driver exposes iio interface entries under its device path
+ can be used to read values from the sensor through its iio interface entries. Dmesg and other kernel
+ logs can be used to verify driver probe , initialization and funtionality.
+
+### Go to device
+    cd /sys/bus/i2c/devices/i2c-1/1-0057/iio:device0/
+
+### Check entries
+    ls /sys/bus/i2c/devices/i2c-1/1-0057/iio:device0/
+
+### Enable scan channels
+    echo 1 | sudo tee scan_elements/in_intensity_ir_en
+    echo 1 | sudo tee scan_elements/in_intensity_red_en
+
+### Enable buffer
+echo 1 | sudo tee buffer/enable
+
+### Read raw binary stream
+sudo hexdump /dev/iio:device0
+
+### Read directly
+sudo cat /dev/iio:device0
+
 ## License
 
  This driver is license under the GNU General Public License version v2.0 GPL-2.0. For more information
  refer to License file.
+
 
