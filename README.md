@@ -2,7 +2,7 @@
 
 ## Table of Contents
  - [Overview](#overview)
- - [Supported Devices](#supported devices)
+ - [Supported Devices](#supported-devices)
  - [Features](#features)
  - [Hardware Connections](#hardware-connections)
  - [Device Tree Example](#device-tree-example)
